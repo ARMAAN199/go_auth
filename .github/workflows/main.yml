@@ -29,9 +29,16 @@ jobs:
       - name: Build application
         run: go build -o myapp
 
-      - name: Deploy to server
-        env:
-          SERVER_IP: ${{ secrets.SERVER_IP }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Decode SSH private key
         run: |
-          ssh -i $SSH_PRIVATE_KEY user@${SERVER_IP} "cd /home/ec2-user/project/go_auth && ./myapp"
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 --decode > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ~/.ssh/id_rsa
+
+      - name: Deploy to EC2 instance
+        run: |
+          ssh ec2-user@${{ secrets.SERVER_IP }} "cd /home/ec2-user/project/go_auth && ./myapp.sh"
