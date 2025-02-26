@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
@@ -26,4 +27,10 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	// Write the JSON data to the response writer
 	_, err = w.Write(jsonData)
 	return err
+}
+
+func FailOnError(err error, msg string) {
+	if err != nil {
+		log.Panicf("%s: %s", msg, err)
+	}
 }

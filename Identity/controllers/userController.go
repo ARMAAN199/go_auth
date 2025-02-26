@@ -8,9 +8,10 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
 
+	"github.com/ARMAAN199/Go_EcomApi/config"
 	"github.com/ARMAAN199/Go_EcomApi/models"
+	"github.com/ARMAAN199/Go_EcomApi/redis"
 	"github.com/ARMAAN199/Go_EcomApi/stores"
 	"github.com/ARMAAN199/Go_EcomApi/utils"
 	"github.com/ARMAAN199/Go_EcomApi/utils/types"
@@ -19,18 +20,28 @@ import (
 )
 
 type UserController struct {
-	store stores.UserStore
+	store   stores.UserStore
+	redis   redis.RedisStore
+	configs *config.AppConfig
 }
 
-func NewUserController(store stores.UserStore) *UserController {
+func NewUserController(store stores.UserStore, redisStore *redis.RedisStore) *UserController {
+
+	configs := config.InitAppConfigs()
+
 	controller := UserController{
-		store: store,
+		store:   store,
+		redis:   *redisStore,
+		configs: configs,
 	}
 	return &controller
 }
 
 func (ctrl *UserController) LoginUser() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		ctx := r.Context()
+
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -73,19 +84,11 @@ func (ctrl *UserController) LoginUser() func(http.ResponseWriter, *http.Request)
 			return
 		}
 
-		http.SetCookie(w, &http.Cookie{
-			Name:     "token",
-			Value:    token,
-			Expires:  time.Now().Add(50 * time.Minute),
-			HttpOnly: true,
-		})
-
-		http.SetCookie(w, &http.Cookie{
-			Name:     "refresh_token",
-			Value:    refreshToken,
-			Expires:  time.Now().Add(2 * time.Minute),
-			HttpOnly: true,
-		})
+		err = ctrl.redis.SetRefreshTokenWithExpiry(ctx, user.Username, refreshToken, ctrl.configs.RefreshTokenExpiryInMinutes)
+		if err != nil {
+			http.Error(w, "Failed to save refresh token", http.StatusInternalServerError)
+			return
+		}
 
 		loginToken := models.Token{
 			AccessToken:  token,
@@ -137,6 +140,51 @@ func (ctrl *UserController) RegisterUser() func(http.ResponseWriter, *http.Reque
 		}
 
 		utils.WriteJSON(w, 200, fmt.Sprintf("created user with id %d", id))
+	}
+}
+
+func (ctrl *UserController) Refresh() func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer r.Body.Close()
+
+		var refreshToken types.RefreshToken
+		err = json.Unmarshal(body, &refreshToken)
+		if err != nil {
+			http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+		}
+
+		claims, err := utils.ValidateRefreshToken(refreshToken.RefreshToken)
+		if err != nil {
+			http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+			return
+		}
+
+		username := claims.Username
+
+		_, err = ctrl.redis.GetRefreshToken(r.Context(), username)
+		if err != nil {
+			http.Error(w, "Invalidated from cache", http.StatusUnauthorized)
+			return
+		}
+
+		fmt.Println("generating new access token for user", username)
+
+		token, err := utils.GenerateJWT(username)
+		if err != nil {
+			http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+			return
+		}
+
+		accessToken := models.AccessToken{
+			AccessToken: token,
+		}
+
+		utils.WriteJSON(w, 200, accessToken)
 	}
 }
 

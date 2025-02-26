@@ -6,7 +6,6 @@ import (
 )
 
 type UserStore interface {
-	Login()
 	Register(*models.User) (int, error)
 	GetUser(string) (*models.User, error)
 }
@@ -22,9 +21,9 @@ func NewDBUserStore(db *gorm.DB) *dbUserStore {
 	return store
 }
 
-func (store *dbUserStore) Login() {
-	var car *models.Cars
-	result := store.db.First(&car)
+func (store *dbUserStore) Refresh() {
+	var user *models.User
+	result := store.db.First(&user)
 
 	// Handle the error
 	if result.Error != nil {
@@ -48,7 +47,7 @@ func (store *dbUserStore) Register(user *models.User) (int, error) {
 
 func (store *dbUserStore) GetUser(username string) (*models.User, error) {
 	var user *models.User
-	result := store.db.First(&user, "username = ?", username)
+	result := store.db.Take(&user, "username = ?", username)
 
 	// Handle the error
 	if result.Error != nil {
